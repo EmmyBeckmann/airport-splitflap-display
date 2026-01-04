@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Airport Split-Flap Display</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            background: #1a1a1a;
+            font-family: 'Courier New', monospace;
+            overflow: hidden;
+            color: #ffa500;
+        }
+        
+        .board {
+            width: 100vw;
+            padding: 40px;
+            background: linear-gradient(180deg, #2a2a2a 0%, #1a1a1a 100%);
+        }
+        
+        h1 {
+            text-align: center;
+            font-size: 48px;
+            margin-bottom: 30px;
+            color: #ffa500;
+            text-transform: uppercase;
+            letter-spacing: 8px;
+        }
+        
+        .header {
+            display: flex;
+            padding: 15px 20px;
+            background: #333;
+            border-radius: 5px;
+            margin-bottom: 10px;
+            font-size: 18px;
+            font-weight: bold;
+        }
+        
+        .header > div {
+            flex: 1;
+            text-align: center;
+        }
+        
+        .row {
+            display: flex;
+            background: #222;
+            margin: 8px 0;
+            padding: 20px;
+            border-radius: 8px;
+            font-size: 32px;
+            font-weight: bold;
+            letter-spacing: 2px;
+            animation: flipIn 0.6s ease;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+        }
+        
+        @keyframes flipIn {
+            0% { transform: rotateX(-90deg); opacity: 0; }
+            100% { transform: rotateX(0); opacity: 1; }
+        }
+        
+        .row > div {
+            flex: 1;
+            text-align: center;
+            padding: 0 10px;
+        }
+        
+        .time { color: #00ff00; }
+        .flight { color: #ffff00; }
+        .city { color: #ffffff; }
+        .gate { color: #00ffff; }
+        .status { color: #ff6600; }
+        .status.delayed { color: #ff0000; }
+        .status.boarding {
+            color: #00ff00;
+            animation: blink 1s infinite;
+        }
+        
+        @keyframes blink {
+            0%, 50% { opacity: 1; }
+            51%, 100% { opacity: 0.3; }
+        }
+        
+        #loading {
+            text-align: center;
+            padding: 100px;
+            font-size: 24px;
+        }
+    </style>
+</head>
+<body>
+    <div class="board">
+        <h1>✈ DEPARTURES</h1>
+        <div class="header">
+            <div>TIME</div>
+            <div>FLIGHT</div>
+            <div>DESTINATION</div>
+            <div>GATE</div>
+            <div>STATUS</div>
+        </div>
+        <div id="flights">
+            <div id="loading">LOADING FLIGHT DATA...</div>
+        </div>
+    </div>
+
+    <script>
+        // Configuration - YOU CAN CUSTOMIZE THESE
+        const CONFIG = {
+            // Free API options (choose one):
+            apiOption: 'mock',  // 'aviationstack' or 'mock'
+            
+            // If using Aviationstack (sign up free at https://aviationstack.com)
+            aviationstackKey: 'YOUR_API_KEY_HERE',  // Replace with your free API key
+            airport: 'LHR',  // Airport code (LHR=London Heathrow, JFK=New York, etc.)
+            
+            refreshInterval: 60000,  // Update every 60 seconds
+            maxFlights: 12,          // Number of flights to display
+            rotateInterval: 15000    // Rotate display every 15 seconds
+        };
+
+        let allFlights = [];
+        let displayOffset = 0;
+
+        // Mock data generator for testing without API
+        function generateMockFlights() {
+            const cities = ['NEW YORK','PARIS','TOKYO','DUBAI','SINGAPORE','ROME','MADRID','AMSTERDAM','BERLIN','ISTANBUL'];
+            const airlines = ['BA','AA','LH','EK','AF','KL','IB','AZ'];
+            const gates = ['A','B','C','D','E'];
+            const statuses = ['ON TIME','BOARDING','DELAYED','GATE CLOSING'];
+            
+            return Array.from({length: 20}, (_, i) => {
+                const hour = Math.floor(Math.random() * 24);
+                const min = Math.floor(Math.random() * 60);
+                return {
+                    time: `${String(hour).padStart(2,'0')}:${String(min).padStart(2,'0')}`,
+                    flight: `${airlines[Math.floor(Math.random()*airlines.length)]}${100+i}`,
+                    city: cities[Math.floor(Math.random()*cities.length)],
+                    gate: `${gates[Math.floor(Math.random()*gates.length)]}${Math.floor(Math.random()*30)+1}`,
+                    status: statuses[Math.floor(Math.random()*statuses.length)]
+                };
+            }).sort((a,b) => a.time.localeCompare(b.time));
+        }
+
+        // Fetch real flight data from Aviationstack
+        async function fetchAviationstackFlights() {
+            try {
+                const url = `http://api.aviationstack.com/v1/flights?access_key=${CONFIG.aviationstackKey}&dep_iata=${CONFIG.airport}&limit=${CONFIG.maxFlights * 2}`;
+                const response = await fetch(url);
+                const data = await response.json();
+                
+                if (data.error) {
+                    console.error('API Error:', data.error);
+                    return null;
+                }
+                
+                return data.data.map(f => ({
+                    time: f.departure.scheduled ? new Date(f.departure.scheduled).toLocaleTimeString('en-GB', {hour:'2-digit',minute:'2-digit'}) : 'TBA',
+                    flight: f.flight.iata || f.flight.number || 'N/A',
+                    city: (f.arrival.airport || '').split(' ')[0].toUpperCase().substring(0,12),
+                    gate: f.departure.gate || 'TBA',
+                    status: f.flight_status ? f.flight_status.toUpperCase().replace('_',' ') : 'SCHEDULED'
+                }));
+            } catch (error) {
+                console.error('Fetch error:', error);
+                return null;
+            }
+        }
+
+        // Main data fetcher
+        async function fetchFlights() {
+            if (CONFIG.apiOption === 'aviationstack' && CONFIG.aviationstackKey !== 'YOUR_API_KEY_HERE') {
+                const flights = await fetchAviationstackFlights();
+                if (flights) return flights;
+            }
+            
+            // Fallback to mock data
+            return generateMockFlights();
+        }
+
+        // Render flights to screen
+        function renderFlights(flights) {
+            const container = document.getElementById('flights');
+            const toShow = flights.slice(displayOffset, displayOffset + CONFIG.maxFlights);
+            
+            container.innerHTML = toShow.map(f => `
+                <div class="row">
+                    <div class="time">${f.time}</div>
+                    <div class="flight">${f.flight}</div>
+                    <div class="city">${f.city}</div>
+                    <div class="gate">${f.gate}</div>
+                    <div class="status ${f.status.toLowerCase().replace(' ','-')}">${f.status}</div>
+                </div>
+            `).join('');
+            
+            // Rotate display
+            displayOffset += CONFIG.maxFlights;
+            if (displayOffset >= flights.length) displayOffset = 0;
+        }
+
+        // Initialize and start updates
+        async function init() {
+            allFlights = await fetchFlights();
+            renderFlights(allFlights);
+            
+            // Rotate display
+            setInterval(() => renderFlights(allFlights), CONFIG.rotateInterval);
+            
+            // Refresh data
+            setInterval(async () => {
+                allFlights = await fetchFlights();
+                displayOffset = 0;
+            }, CONFIG.refreshInterval);
+        }
+
+        init();
+    </script>
+</body>
+</html>
